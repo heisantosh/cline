@@ -239,6 +239,43 @@ export class Controller {
 				sendRelinquishControlEvent()
 				break
 			}
+			case "startVoiceChat":
+				this.outputChannel.appendLine("Executing command: workbench.action.chat.startVoiceChat")
+				vscode.commands.executeCommand("workbench.action.chat.startVoiceChat")
+				break
+			case "stopVoiceChat":
+				this.outputChannel.appendLine("Received stopVoiceChat message. Attempting to capture transcribed text.")
+				try {
+					// Show an input box. The speech extension should target this.
+					const inputBoxPromise = vscode.window.showInputBox({
+						placeHolder: "Voice input will appear here...",
+						prompt: "Voice transcription in progress. The text will appear once submitted by the voice system.",
+						ignoreFocusOut: true, // Keep it open even if focus shifts briefly
+					})
+
+					// Execute the stop listening command. This should populate the input box.
+					// We don't await this, as it might complete before or after showInputBox is ready,
+					// but showInputBox should capture the input.
+					vscode.commands.executeCommand("workbench.action.chat.stopListeningAndSubmit")
+
+					// Await the result from the input box.
+					const transcribedText = await inputBoxPromise
+
+					if (transcribedText && transcribedText.trim() !== "") {
+						this.outputChannel.appendLine(`Transcribed text received: "${transcribedText}"`)
+						this.postMessageToWebview({ type: "transcribedText", text: transcribedText })
+					} else {
+						this.outputChannel.appendLine("No text received from input box or text was empty.")
+						// Optionally, notify webview that no text was captured
+						this.postMessageToWebview({ type: "transcribedText", text: "" })
+					}
+				} catch (error) {
+					this.outputChannel.appendLine(`Error capturing transcribed text: ${error}`)
+					console.error("Error capturing transcribed text:", error)
+					// Optionally, notify webview about the error
+					this.postMessageToWebview({ type: "transcribedText", text: "", error: String(error) })
+				}
+				break
 			case "grpc_request": {
 				if (message.grpc_request) {
 					await handleGrpcRequest(this, message.grpc_request)

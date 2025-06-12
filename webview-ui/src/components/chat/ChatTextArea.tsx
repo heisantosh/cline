@@ -281,6 +281,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			globalWorkflowToggles,
 		} = useExtensionState()
 		const [isTextAreaFocused, setIsTextAreaFocused] = useState(false)
+		const [isVoiceTranscriptionActive, setIsVoiceTranscriptionActive] = useState(false)
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [gitCommits, setGitCommits] = useState<GitCommit[]>([])
 
@@ -323,6 +324,22 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 		// Add a ref to track previous menu state
 		const prevShowModelSelector = useRef(showModelSelector)
+
+		useEffect(() => {
+			const handleMessage = (event: MessageEvent) => {
+				const message = event.data
+				if (message.type === "transcribedText") {
+					setInputValue(message.text)
+					setIsVoiceTranscriptionActive(false)
+					textAreaRef.current?.focus()
+				}
+			}
+
+			window.addEventListener("message", handleMessage)
+			return () => {
+				window.removeEventListener("message", handleMessage)
+			}
+		}, [setInputValue])
 
 		// Fetch git commits when Git is selected or when typing a hash
 		useEffect(() => {
@@ -1380,10 +1397,25 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						// Drag-over styles moved to DynamicTextArea
 						transition: "background-color 0.1s ease-in-out, border 0.1s ease-in-out",
 					}}
-					onDrop={onDrop}
-					onDragOver={onDragOver}
-					onDragEnter={handleDragEnter}
-					onDragLeave={handleDragLeave}>
+					onDrop={isVoiceTranscriptionActive ? undefined : onDrop}
+					onDragOver={isVoiceTranscriptionActive ? undefined : onDragOver}
+					onDragEnter={isVoiceTranscriptionActive ? undefined : handleDragEnter}
+					onDragLeave={isVoiceTranscriptionActive ? undefined : handleDragLeave}>
+					{isVoiceTranscriptionActive && (
+						<div
+							style={{
+								position: "absolute",
+								top: "50%",
+								left: "50%",
+								transform: "translate(-50%, -50%)",
+								color: "var(--vscode-input-placeholderForeground)",
+								fontSize: "var(--vscode-editor-font-size)",
+								zIndex: 10, // Ensure it's above other elements
+								pointerEvents: "none",
+							}}>
+							Listening...
+						</div>
+					)}
 					{showDimensionError && (
 						<div
 							style={{
@@ -1532,9 +1564,16 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							}
 							onHeightChange?.(height)
 						}}
-						placeholder={showUnsupportedFileError || showDimensionError ? "" : placeholderText}
+						placeholder={
+							isVoiceTranscriptionActive
+								? ""
+								: showUnsupportedFileError || showDimensionError
+									? ""
+									: placeholderText
+						}
 						maxRows={10}
 						autoFocus={true}
+						disabled={isVoiceTranscriptionActive}
 						style={{
 							width: "100%",
 							boxSizing: "border-box",
@@ -1561,25 +1600,27 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							// Instead of using boxShadow, we use a div with a border to better replicate the behavior when the textarea is focused
 							// boxShadow: "0px 0px 0px 1px var(--vscode-input-border)",
 							padding: "9px 28px 9px 9px",
-							cursor: "text",
+							cursor: isVoiceTranscriptionActive ? "not-allowed" : "text",
 							flex: 1,
 							zIndex: 1,
 							outline:
-								isDraggingOver && !showUnsupportedFileError // Only show drag outline if not showing error
-									? "2px dashed var(--vscode-focusBorder)"
-									: isTextAreaFocused
-										? `1px solid ${chatSettings.mode === "plan" ? PLAN_MODE_COLOR : "var(--vscode-focusBorder)"}`
-										: "none",
+								isVoiceTranscriptionActive // Added this condition
+									? "none"
+									: isDraggingOver && !showUnsupportedFileError // Only show drag outline if not showing error
+										? "2px dashed var(--vscode-focusBorder)"
+										: isTextAreaFocused
+											? `1px solid ${chatSettings.mode === "plan" ? PLAN_MODE_COLOR : "var(--vscode-focusBorder)"}`
+											: "none",
 							outlineOffset: isDraggingOver && !showUnsupportedFileError ? "1px" : "0px", // Add offset for drag-over outline
 						}}
 						onScroll={() => updateHighlights()}
 					/>
-					{!inputValue && selectedImages.length === 0 && selectedFiles.length === 0 && (
+					{!inputValue && !isVoiceTranscriptionActive && selectedImages.length === 0 && selectedFiles.length === 0 && (
 						<div className="absolute bottom-4 left-[25px] right-[60px] text-[10px] text-[var(--vscode-input-placeholderForeground)] opacity-70 whitespace-nowrap overflow-hidden text-ellipsis pointer-events-none z-[1]">
 							Type @ for context, / for slash commands & workflows
 						</div>
 					)}
-					{(selectedImages.length > 0 || selectedFiles.length > 0) && (
+					{(selectedImages.length > 0 || selectedFiles.length > 0) && !isVoiceTranscriptionActive && (
 						<Thumbnails
 							images={selectedImages}
 							files={selectedFiles}
@@ -1690,6 +1731,28 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									<ButtonContainer>
 										<span
 											className="codicon codicon-add flex items-center"
+											style={{ fontSize: "14px", marginBottom: -3 }}
+										/>
+									</ButtonContainer>
+								</VSCodeButton>
+							</Tooltip>
+							<Tooltip tipText="Voice Input">
+								<VSCodeButton
+									appearance="icon"
+									aria-label="Voice Input"
+									onClick={() => {
+										const newTranscriptionStatus = !isVoiceTranscriptionActive
+										setIsVoiceTranscriptionActive(newTranscriptionStatus)
+										if (newTranscriptionStatus) {
+											vscode.postMessage({ command: "startVoiceChat" })
+										} else {
+											vscode.postMessage({ command: "stopVoiceChat" })
+										}
+									}}
+									style={{ padding: "0px 0px", height: "20px" }}>
+									<ButtonContainer>
+										<span
+											className={`codicon ${isVoiceTranscriptionActive ? "codicon-stop-circle" : "codicon-mic"} flex items-center`}
 											style={{ fontSize: "14px", marginBottom: -3 }}
 										/>
 									</ButtonContainer>
